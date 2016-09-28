@@ -1,0 +1,16 @@
+This repo contains a sample dashboard that looks at venture capital follow on trends and uses sparkcharts to show follow-on trends in number of investments and by series.
+
+The data comes from a crunchbase excel export from 2014 (unfortunately crunchbase api is no longer public so this dataset cannot be updated) and was loaded into a sqlite database with the following process:
+
+xlsx2csv "crunchbase_monthly_export_d43b44299ade53.xlsx" -s 3 companies.csv
+xlsx2csv "crunchbase_monthly_export_d43b44299ade53.xlsx" -s 3 rounds.csv
+xlsx2csv "crunchbase_monthly_export_d43b44299ade53.xlsx" -s 3 investmets.csv
+xlsx2csv "crunchbase_monthly_export_d43b44299ade53.xlsx" -s 3 acquisitions.csv
+
+sqlite3 companies.sqlite
+
+.mode csv
+.import crunchbase_monthly_export_acquisitions.csv acquisitions
+.import crunchbase_monthly_export_companies.csv companies
+.import crunchbase_monthly_export_investments.csv investments
+.import crunchbase_monthly_export_rounds.csv rounds
