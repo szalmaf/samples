@@ -1,13 +1,6 @@
----
-title: "Crunchbase EDA"
-output: html_document
----
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
 
-## R Markdown
+## Crunchbase data prep
 
 This repo contains a sample dashboard that looks at venture capital follow on trends and uses sparkcharts to show follow-on trends in number of investments and by series.
 
