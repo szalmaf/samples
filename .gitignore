@@ -1,0 +1,4 @@
+*.Rmd
+*.RData
+*.Rhistory
+*.sh
