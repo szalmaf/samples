@@ -21,7 +21,7 @@ library(lazyeval)
 
 
 
-con = dbConnect(RSQLite::SQLite(), dbname='../companies.sqlite')
+con = dbConnect(RSQLite::SQLite(), dbname='../data/companies.sqlite')
 q1 <- "SELECT distinct(investor_name) FROM investments"
 
 q5 = "SELECT investments.investor_name, count(investments.company_name) as total_funded, sum(investments.raised_amount_usd) as total_investments, sum(CASE rounds.status WHEN 'acquired' THEN 1 ELSE 0 END) as exits
