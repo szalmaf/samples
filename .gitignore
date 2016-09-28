@@ -3,3 +3,5 @@
 *.sh
 *.sqlite
 *.xlsx
+*.pyc
+.DS_Store
