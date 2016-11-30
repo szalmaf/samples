@@ -1,0 +1,296 @@
+---
+title: "Kaggle Competion -- Predicting Titanic Survivals"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The sinking of the Titanic in 1912 took the lives of 78% of the people on board.  The titanic dataset provides a rare and interesting opportunity to explore economic and social norms that affect human behavior during a disaster.
+
+Kaggle provides two datasets:
+
+- A training set that contains the outcome (or target variable) along with a unique identifier for each passenger and 10 of explanatory variables: the passenger class, name, gender, age, number of siblings, number of parents of children, ticket number, fare, cabin, and place of embarkment for each passenger.
+
+- A testing set that withholds the outcome (or target variable) that you use to predict the target variable and then submit.
+
+
+## Step 1: Read the data and relevant packages
+```
+setwd("~/Desktop/learning/projects/kaggle/titanic")
+
+library(magrittr)
+library(dplyr)
+library(mlbench)
+library(caret)
+library(caretEnsemble)
+
+train <- read.csv('train.csv', na.strings=c("","NA"))
+test <- read.csv('test.csv')
+
+train$Survived <- factor(train$Survived, levels = c(0,1), 
+                               labels = c('perished', 'survived'))
+                               
+test$Survived <- 'NA'
+frame <- rbind(train, test)
+
+```
+
+## Step 2: Look at proportions tables to see which factors most affect probability of survival
+```
+
+table(frame[c("Survived", "Sex")])
+table(frame[c("Survived", "Pclass")])
+table(frame[c("Survived", "SibSp")])
+table(frame[c("Survived", "Embarked")])
+table(frame[c("Survived", "Parch")])
+table(frame[c("Survived", "Pclass", "Sex")])
+
+```
+##Step 3: Data cleaning and manipulation using R
+
+## New features -- Title
+Here we extract the title from the Name feature.  Of several titles, most are honorifics from various countries.  Let's group those into a single factor (Honorific) which indicates something about class.  The remaining passengers can keep titles: Master, Miss refer to unmarried males/females, Mr./Miss to married males, females.
+```
+frame$Name <- as.character(frame$Name)
+strsplit(frame$Name[1], split="[,.]")[[1]][1]
+
+frame$Title <- sapply(frame$Name, FUN=function(x) {strsplit(x, split="[,.]")[[1]][2]})
+frame$Title <- sub(" ", "", frame$Title)
+
+table(frame$Title)
+frame$Title[frame$Title %in% c("Capt", "Col", "Don", "Dona", "Dr", "Jonkheer", "Lady", "Major", "Rev", "the Countess", "Sir")] <- "Hon"
+frame$Title[frame$Title %in% c('Mme', 'Mrs')] <- 'Mrs'
+frame$Title[frame$Title %in% c('Mlle', 'Miss', 'Ms')] <- 'Miss'
+```
+
+##New Features -- Surname
+Extracting the surname from the Name column will help identify familes.
+```
+strsplit(frame$Name[1], split="[,.]")[[1]][1]
+frame$Surname <- sapply(frame$Name, FUN=function(x) {strsplit(x, split="[,.]")[[1]][1]})
+frame$Surname <- sub(" ", "", frame$Surname)
+```
+## Null Imputation -- Age
+The Age field contains several null values.  Various inputation strategies include mean/median imputation or using linear regression to interpolate ages.  I use median impuation here based on the passenger's title because Miss/Master indicate something about age.
+```
+table(frame$Title)
+
+mean(frame$Age[frame$Title=='Master'], na.rm=TRUE)
+
+median(frame$Age[frame$Title=='Master'], na.rm=TRUE)
+frame$Age[frame$Title %in% 'Master' & is.na(frame$Age)] <- median(frame$Age[frame$Title=='Master'], na.rm=TRUE)
+frame$Age[frame$Title %in% 'Miss' & is.na(frame$Age)] <- median(frame$Age[frame$Title=='Miss'], na.rm=TRUE)
+frame$Age[frame$Title %in% 'Mr' & is.na(frame$Age)] <- median(frame$Age[frame$Title=='Mr'], na.rm=TRUE)
+frame$Age[frame$Title %in% 'Mrs' & is.na(frame$Age)] <- median(frame$Age[frame$Title=='Mrs'], na.rm=TRUE)
+frame$Age[frame$Title %in% 'Hon' & is.na(frame$Age)] <- median(frame$Age[frame$Title=='Hon'], na.rm=TRUE)
+
+```
+
+## Null Imputation -- Embarked
+The Embarked field contains a few nulls.  I will impute these using the mode, which is S.
+```
+summary(frame$Embarked)
+frame$Embarked[is.na(frame$Embarked)] <- 'S'
+frame$Embarked <- factor(frame$Embarked)
+```
+
+## Null Imputation -- Cabin
+The Cabin field contains a number of nulls.  I will fill these in with 'U00' so that the field is not null but at this time, I am not using any technique to impute the nulls.
+```
+frame$Cabin <- as.character(frame$Cabin)
+frame$Cabin[is.na(frame$Cabin)] <- 'U00'
+table(frame$Cabin, frame$Survived)
+
+```
+
+## Null imputation -- Fare
+There is only a couple of missing values in the Fare field so I am using median value imputation here.
+```
+frame$Fare[is.na(frame$Fare)] <- median(frame$Fare, na.rm=TRUE)
+names(frame)
+summary(frame)
+
+```
+
+## New Features -- Family Size
+```
+frame$FamilySize <- frame$SibSp + frame$Parch + 1
+```
+
+# New Features -- Finding Families
+Using the family size and surname, we can create a new feature that identifies families.  
+```
+frame[c("Surname", "FamilySize")]
+frame$Family <- paste(frame$Surname, frame$FamilySize, sep="")
+
+```
+
+##New Features -- Age Range
+Here I bin passengers into age ranges.
+```
+frame["AgeRange"] <- cut(frame$Age, breaks=c(0, 14, 24, 34, max(frame$Age)))
+table(frame$Survived, frame$AgeRange)
+```
+
+
+
+##New Features -- Large Families
+```
+frame$LargeFamily <- with(frame, frame$FamilySize >= 3)
+table(frame$LargeFamily, frame$Survived)
+```
+##New Features -- FareGroup
+Here, I bin the passenger fares into different groups.
+```
+summary(frame$Fare)
+frame$FareGroup <- '30+'
+frame$FareGroup[frame$Fare < 30 & frame$Fare >= 20] <- '20-30'
+frame$FareGroup[frame$Fare < 20 & frame$Fare >= 10] <- '10-20'
+frame$FareGroup[frame$Fare < 10] <- '<10'
+frame$FareGroup <- factor(frame$FareGroup)
+```
+## New Features -- Mother / Father
+Here, I create a new field that estimates whether a passenger is a mother and another, seperate field that estimates whether a passenger is a father.
+```
+frame$Mother <- 'N'
+frame$Mother[frame$Sex == 'female' & frame$Parch > 0 & frame$Title != 'Miss'] <- 'Y'
+frame$Father <- 'N'
+frame$Father[frame$Sex == 'male' & frame$Parch > 0 & frame$Age > 18 &  frame$Title == 'Mr'] <- 'Y'
+
+
+```
+
+```
+table(frame$Survived, frame$Mother)
+table(frame$Survived, frame$Father)
+```
+
+## Data Exploration
+
+Here I create some proportions tables to calculate the percent of passengers from various groups that survived.
+
+## Proportions table: gender
+```
+aggregate(Survived~FamilySize + Pclass + Sex, data=frame, FUN=function(x) {sum(x)/length(x)})
+```
+
+## Proportions table: passenger class
+```
+aggregate(Survived ~Family + Pclass, data=frame, FUN=length)
+```
+
+## Proportions table: families
+```
+aggregate(Survived ~ Family + Pclass, data=frame, FUN=function(x) {sum(x)/length(x)})
+
+```
+
+## Proportions table: gender + passenger class
+```
+aggregate(Survived ~ Sex + Pclass, data=frame, FUN=length)
+```
+
+## Proportions table: cabin + gender + passenger class
+```
+aggregate(Survived ~ Cabin + Pclass + Sex, data=frame, FUN=function(x) {sum(x)/length(x)})
+```
+
+## Set up data types for modeling
+Here I set up the features so that they are the right variable types for the model.
+
+## Passenger Class as Features
+```
+frame$Pclass2[frame$Pclass==1] <- 'first'
+frame$Pclass2[frame$Pclass==2] <- 'second'
+frame$Pclass2[frame$Pclass==3] <- 'third'
+frame$Pclass2 <- factor(frame$Pclass2)
+```
+
+## Set characters as factors
+```
+id <- "PassengerId"
+target <- "Survived"
+omit <- "Name"
+potential.regressors <- setdiff(names(frame),c(id,target, omit))
+
+frame <- frame %>% mutate_if(is.character, as.factor)
+
+summary(frame)
+```
+
+
+## Modeling
+# Prep test and train sets
+Here I separate out the training and the test set provided by kaggle.  I also use the training set to create an additional testing set.  This way, I can test various models before submitting to kaggle.
+
+```
+train <- frame[1:891,]
+test <- frame[892:1309,]
+train.r <- sample(nrow(train),as.integer(nrow(train)*0.8))
+test.r <- which(! 1:nrow(train) %in% train.r )
+test.reduced <- train[test.r,]
+train.reduced <- train[train.r,]
+summary(test.reduced)
+summary(train.reduced)
+train.reduced$Survived <- factor(train.reduced$Survived)
+```
+
+## Run Models using caret package
+Here I run a random forest model (everyone seems to use this with kaggle) and a logistic regression (the model that I have most used in life).  I also add svm and lda just for fun because this is my first time using the caret package.
+
+```
+seed <- 7
+control <- trainControl(method="cv", number=10, repeats=3)
+set.seed(seed)
+
+## Model 1 
+model.rf <- train(Survived ~ Sex + Pclass + Age + I(Age*Pclass) + Embarked + Title + I(FamilySize^3) + FareGroup, data=train.reduced, method="rf", preProcess="scale", metric="Accuracy", trControl=control, importance=TRUE, verbose=TRUE)
+
+model.lr <- train(Survived ~ Sex + Pclass + Age + I(Pclass*Age) + Fare + Embarked + Title + AgeRange + I(FamilySize^3) + LargeFamily + FareGroup, data=train.reduced, method="glm", preProcess="scale", metric="Accuracy", trControl=control)
+
+model.svm <- train(Survived ~ Sex + Pclass + Age + I(Age*Pclass) + Embarked + Title + I(FamilySize^3) + FareGroup, data=train.reduced, method="svmRadial", preProcess="scale", metric="Accuracy", trControl=control, importance=TRUE, verbose=TRUE)
+
+model.lda <- train(Survived ~ Sex + Pclass + Age + I(Age*Pclass) + Embarked + Title + I(FamilySize^3) + FareGroup, data=train.reduced, method="lda", preProcess="scale", metric="Accuracy", trControl=control, importance=TRUE, verbose=TRUE)
+```
+## Checking Feature Importance
+Here we can check which features are most important.  According to the caret package, the glm feature importance is based on the t-statistic while the random forest feature importance is based on prediction accuracy.
+```
+importance.rf <- varImp(model.rf, scale=FALSE)
+importance.lr <- varImp(model.lr, scale=FALSE)
+importance.svm <- varImp(model.svm, scale=FALSE)
+importance.lda <- varImp(model.lda, scale=FALSE)
+```
+
+## Predictions on test.reduced
+Here I test the accuracy of my data on the subset that I put aside for testing.  And use the proportions tables to look at accuracy, false negatives, and false positives.
+```
+summary(test.reduced)
+
+test.reduced$survived.gender <- ifelse(test.reduced$Sex=='female', 1, 0)
+test.reduced$survived.gender.class <- 0
+test.reduced$survived.gender.class[test.reduced$Sex == 'female'] <- 1
+test.reduced$survived.gender.class[test.reduced$Sex == 'female' & test.reduced$Pclass == 3 & test.reduced$Fare >= 20] <- 0
+
+test.reduced$survived.rf <- predict(model.rf, newdata=test.reduced)
+test.reduced$survived.lr <- predict(model.lr, newdata=test.reduced)
+test.reduced$survived.svm <- predict(model.svm, newdata=test.reduced)
+test.reduced$survived.lda <- predict(model.lda, newdata=test.reduced)
+
+
+table(test.reduced[c("Survived", "survived.rf")])
+table(test.reduced[c("Survived", "survived.lr")])
+table(test.reduced[c("Survived", "survived.svm")])
+table(test.reduced[c("Survived", "survived.lda")])
+table(test.reduced[c("Survived", "survived.gender.class")])
+table(test.reduced[c("Survived", "survived.gender")])
+```
+## Submit
+Here, I use the kaggle test set without labels and prepare the data for submission.
+```
+test$survived.rf <- predict(model.rf, newdata=test)
+submit <- test[c("PassengerId", "survived.rf")]
+names(submit) <- c("PassengerId", "Survived")
+write.csv(submit, file="first_kaggle_submit_rf.csv", row.names = FALSE)
+```
